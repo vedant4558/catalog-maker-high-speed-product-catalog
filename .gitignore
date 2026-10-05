@@ -1,0 +1,22 @@
+# dependencies / build output
+node_modules
+.next
+out
+*.tsbuildinfo
+next-env.d.ts
+
+# secrets: never commit. Only .env.example is tracked.
+.env
+.env.*
+!.env.example
+
+# Vercel local link + pulled env files
+.vercel
+
+# misc
+.DS_Store
+npm-debug.log*
+*.log
+*.zip
+
+.vercel

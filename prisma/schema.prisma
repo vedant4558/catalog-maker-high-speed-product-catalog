@@ -1,0 +1,189 @@
+generator client {
+  provider      = "prisma-client-js"
+  // "native" = your own machine; "rhel-openssl-3.0.x" = Vercel's serverless runtime (Node 20/22).
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Runtime queries. On Neon/Supabase use the POOLED connection string here (serverless-friendly).
+  url       = env("DATABASE_URL")
+  // Schema commands (migrate deploy / db push). Use the DIRECT (non-pooled) string; if your
+  // provider has no pooler, set it to the same value as DATABASE_URL.
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Multi-client ready: every business table hangs off Client. Single-client mode
+// simply uses one row (DEFAULT_CLIENT_SLUG).
+// ---------------------------------------------------------------------------
+
+enum SourceType {
+  SHOPIFY
+  WOOCOMMERCE
+  MANUAL
+}
+
+enum StockStatus {
+  IN_STOCK
+  OUT_OF_STOCK
+  ON_BACKORDER
+}
+
+enum SyncStatus {
+  RUNNING
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+model Client {
+  id             String     @id @default(cuid())
+  name           String
+  slug           String     @unique
+  domain         String?    @unique // custom domain / CNAME (bonus)
+  whatsappNumber String? // international format, digits only, e.g. 919876543210
+  activeDesign   String     @default("grid") // key of a registered design (Part 4)
+  currency       String     @default("INR")
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  sources        Source[]
+  categories     Category[]
+  products       Product[]
+}
+
+model Source {
+  id             String     @id @default(cuid())
+  clientId       String
+  client         Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  type           SourceType
+  name           String
+  baseUrl        String? // shop domain / WordPress site URL
+  credentials    Json? // tokens / keys (encrypt at rest in production)
+  lastSyncAt     DateTime?
+  lastSyncStatus SyncStatus?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  products       Product[]
+  syncRuns       SyncRun[]
+
+  @@index([clientId])
+}
+
+model Category {
+  id         String     @id @default(cuid())
+  clientId   String
+  client     Client     @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  parentId   String?
+  parent     Category?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children   Category[] @relation("CategoryTree")
+  name       String
+  slug       String
+  imageUrl   String?
+  sortOrder  Int        @default(0)
+  isVisible  Boolean    @default(true)
+  externalId String? // id in the source system, for import mapping
+  sourceType SourceType @default(MANUAL)
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+  products   Product[]
+
+  @@unique([clientId, slug])
+  @@index([clientId, isVisible, sortOrder])
+}
+
+model Product {
+  id              String      @id @default(cuid())
+  clientId        String
+  client          Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  sourceId        String?
+  source          Source?     @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  externalId      String? // id in Shopify / Woo; null for manual products
+  sku             String?
+  name            String
+  slug            String
+  description     String?
+  price           Decimal     @db.Decimal(12, 2)
+  compareAtPrice  Decimal?    @db.Decimal(12, 2)
+  currency        String      @default("INR")
+  stockStatus     StockStatus @default(IN_STOCK)
+  stockQty        Int?
+  sourceUrl       String?
+  thumbnailUrl    String? // denormalised first image: list queries never join images
+  categoryId      String?
+  category        Category?   @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  metadata        Json? // tags, vendor, weight, attributes, etc.
+  contentHash     String? // hash of normalised source payload: sync skips unchanged
+  isActive        Boolean     @default(true)
+  manualOverrides Json? // fields an admin edited; sync must not overwrite them
+  sourceUpdatedAt DateTime?
+  lastSyncedAt    DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  images          ProductImage[]
+  variants        Variant[]
+
+  // Prevents duplicates on re-import; multiple NULL externalIds (manual) are allowed.
+  @@unique([sourceId, externalId])
+  @@unique([clientId, slug])
+  @@index([clientId, isActive, categoryId, createdAt])
+  @@index([clientId, isActive, price])
+  @@index([clientId, sku])
+}
+
+model ProductImage {
+  id        String  @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  url       String
+  alt       String?
+  width     Int?
+  height    Int?
+  position  Int     @default(0)
+
+  @@index([productId, position])
+}
+
+model Variant {
+  id          String      @id @default(cuid())
+  productId   String
+  product     Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  externalId  String?
+  sku         String?
+  title       String
+  price       Decimal?    @db.Decimal(12, 2)
+  stockStatus StockStatus @default(IN_STOCK)
+  options     Json? // e.g. {"Size":"M","Color":"Red"}
+  position    Int         @default(0)
+
+  @@index([productId, position])
+}
+
+model SyncRun {
+  id         String      @id @default(cuid())
+  sourceId   String
+  source     Source      @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+  trigger    String      @default("manual") // manual | schedule | import
+  status     SyncStatus  @default(RUNNING)
+  startedAt  DateTime    @default(now())
+  finishedAt DateTime?
+  created    Int         @default(0)
+  updated    Int         @default(0)
+  unchanged  Int         @default(0)
+  failed     Int         @default(0)
+  message    String?
+  errors     SyncError[]
+
+  @@index([sourceId, startedAt])
+}
+
+model SyncError {
+  id         String   @id @default(cuid())
+  runId      String
+  run        SyncRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  externalId String?
+  message    String
+  createdAt  DateTime @default(now())
+
+  @@index([runId])
+}
