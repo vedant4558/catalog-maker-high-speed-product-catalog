@@ -4,15 +4,15 @@ import { GridCard } from "./Card";
 import { MoreProducts } from "@/components/shop/MoreProducts";
 import { catHref, navFor } from "@/lib/shop";
 
-export function GridHome({ categories, activeCategory, q, sort, inStock, items, nextCursor, qs }: HomeProps) {
+export function GridHome({ categories, activeCategory, q, sort, inStock, items, nextCursor, qs, keep }: HomeProps) {
   const { subs, top } = navFor(categories, activeCategory);
   const sub = (on: boolean) => `shrink-0 rounded-md px-3 py-1.5 text-sm ${on ? "bg-neutral-200 font-semibold" : "text-neutral-600 hover:bg-neutral-100"}`;
   return (
     <>
       {subs.length > 0 && top && (
         <nav aria-label="Subcategories" className="mb-3"><ul className="flex gap-1 overflow-x-auto [scrollbar-width:none]">
-          <li><Link href={catHref(top.slug)} className={sub(activeCategory?.id === top.id)}>All {top.name}</Link></li>
-          {subs.map((s) => <li key={s.id}><Link href={catHref(s.slug)} className={sub(activeCategory?.id === s.id)}>{s.name}</Link></li>)}
+          <li><Link href={catHref(top.slug, keep)} className={sub(activeCategory?.id === top.id)}>All {top.name}</Link></li>
+          {subs.map((s) => <li key={s.id}><Link href={catHref(s.slug, keep)} className={sub(activeCategory?.id === s.id)}>{s.name}</Link></li>)}
         </ul></nav>
       )}
       <form action="/" method="get" className="mb-4 flex flex-wrap items-center gap-3 text-sm">

@@ -30,7 +30,11 @@ export function parseHome(sp: Record<string, string | string[] | undefined>) {
   if (sort !== "newest") params.set("sort", sort);
   if (inStock) params.set("inStock", "1");
   params.set("limit", String(PAGE_SIZE));
-  return { category, q, sort, inStock, query, qs: params.toString() };
+  // Sort + stock filter are carried along when the customer changes category or searches, so they are never lost.
+  const keep: Record<string, string> = {};
+  if (sort !== "newest") keep.sort = sort;
+  if (inStock) keep.inStock = "1";
+  return { category, q, sort, inStock, query, qs: params.toString(), keep };
 }
 
 /** Top-level categories + the subcategories of whichever branch is active (for chip rows / trees). */

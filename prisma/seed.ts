@@ -1,5 +1,5 @@
 import { PrismaClient, StockStatus } from "@prisma/client";
-import { demoImages } from "./demo-images";
+import { demoImagesFor } from "./demo-images";
 
 const db = new PrismaClient();
 
@@ -66,8 +66,8 @@ async function main() {
       const slug = slugify(name);
       const price = 1500 + ((n * 937) % 9000);
       const outOfStock = n % 7 === 0;
-      const noImage = n === 5; // exercise the missing-image path
-      const pics = demoImages(slugify(cat), n);
+      const noImage = n === 5; // exercise the missing-image path (Heritage Red Carpet)
+      const pics = demoImagesFor(slug); // exact photo(s) for this product
       const imgs = pics.gallery;
       const exists = await db.product.findUnique({ where: { clientId_slug: { clientId: client.id, slug } } });
       if (exists) continue;
@@ -85,7 +85,7 @@ async function main() {
           categoryId: catId[cat],
           thumbnailUrl: noImage ? null : pics.thumbnail,
           metadata: { material: n % 2 ? "Wool blend" : "Polyester", demo: true },
-          images: noImage ? undefined : { create: imgs.map((url, position) => ({ url, position, alt: name })) }
+          images: noImage || !imgs.length ? undefined : { create: imgs.map((url, position) => ({ url, position, alt: name })) }
         }
       });
     }

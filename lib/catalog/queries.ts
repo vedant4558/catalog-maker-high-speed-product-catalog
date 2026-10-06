@@ -1,6 +1,6 @@
 // The ONE place that reads the catalog for customers. Used by the public API routes (/api/v1/*) AND by the
 // server-rendered pages, so every design and the API always agree. Framework-free: testable without Next.
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { db } from "../db";
 import { detailSelect, listSelect, toDetail, toListItem } from "../dto";
 
@@ -54,23 +54,27 @@ export async function getCategories(clientId: string): Promise<CategoryNode[]> {
 
 export interface ProductQuery { category?: string; q?: string; inStock?: boolean; minPrice?: number; maxPrice?: number; sort?: "newest" | "price_asc" | "price_desc" | "name"; cursor?: string; limit?: number }
 
-const ORDER: Record<string, Prisma.ProductOrderByWithRelationInput[]> = {
-  newest: [{ createdAt: "desc" }, { id: "asc" }],
+// Sorting happens IN THE DATABASE, before pagination: ORDER BY ... LIMIT n, then the next page continues from the
+// last row (keyset cursor). Every order ends with the unique id as a tie-breaker, so pages never overlap or skip.
+// price is a NUMERIC column, so ordering is numeric (99 < 100 < 250 < 999 < 1000), never text order.
+const ORDER: Record<"newest" | "price_asc" | "price_desc", Prisma.ProductOrderByWithRelationInput[]> = {
+  newest: [{ createdAt: "desc" }, { id: "asc" }], // real creation date, newest first
   price_asc: [{ price: "asc" }, { id: "asc" }],
-  price_desc: [{ price: "desc" }, { id: "asc" }],
-  name: [{ name: "asc" }, { id: "asc" }]
+  price_desc: [{ price: "desc" }, { id: "asc" }]
 };
 
 /** List / search / filter with cursor pagination. List rows never join images or variants. */
 export async function listProducts(clientId: string, p: ProductQuery) {
   const limit = Math.min(Math.max(p.limit ?? 24, 1), 48);
   const where: Prisma.ProductWhereInput = { clientId, isActive: true };
+  let categoryIds: string[] | null = null;
 
   if (p.category) {
     const cats = await getCategories(clientId);
     const cat = cats.find((c) => c.slug === p.category);
     if (!cat) return { items: [], nextCursor: null as string | null }; // unknown / hidden category: empty, not an error
-    where.categoryId = { in: [cat.id, ...cats.filter((c) => c.parentId === cat.id).map((c) => c.id)] };
+    categoryIds = [cat.id, ...cats.filter((c) => c.parentId === cat.id).map((c) => c.id)];
+    where.categoryId = { in: categoryIds };
   }
   const tokens = (p.q ?? "").split(/\s+/).filter(Boolean).slice(0, 5);
   if (tokens.length) {
@@ -79,12 +83,47 @@ export async function listProducts(clientId: string, p: ProductQuery) {
   if (p.inStock) where.stockStatus = { not: "OUT_OF_STOCK" };
   if (p.minPrice != null || p.maxPrice != null) where.price = { gte: p.minPrice, lte: p.maxPrice };
 
-  const rows = await db.product.findMany({
-    where, orderBy: ORDER[p.sort ?? "newest"], take: limit + 1, ...(p.cursor ? { cursor: { id: p.cursor }, skip: 1 } : {}), select: listSelect
-  });
+  let rows;
+  if (p.sort === "name") {
+    // Name A-Z must be case-insensitive whatever the database collation is ("apple" next to "Apple", not after "Zebra").
+    // Prisma cannot ORDER BY lower(name), so the ordered page of ids comes from one small SQL query with the SAME filters.
+    const ids = await idsByName(clientId, { categoryIds, tokens, inStock: !!p.inStock, minPrice: p.minPrice, maxPrice: p.maxPrice }, p.cursor, limit + 1);
+    const found = ids.length ? await db.product.findMany({ where: { id: { in: ids } }, select: listSelect }) : [];
+    const byId = new Map(found.map((r) => [r.id, r]));
+    rows = ids.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
+  } else {
+    rows = await db.product.findMany({
+      where, orderBy: ORDER[p.sort ?? "newest"] ?? ORDER.newest, take: limit + 1, ...(p.cursor ? { cursor: { id: p.cursor }, skip: 1 } : {}), select: listSelect
+    });
+  }
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
   return { items: page.map(toListItem), nextCursor: hasMore ? page[page.length - 1].id : null };
+}
+
+const likeEscape = (t: string) => `%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+
+/** ORDER BY lower(name), id with keyset pagination. Filters mirror listProducts exactly (tested for equality). */
+async function idsByName(
+  clientId: string,
+  f: { categoryIds: string[] | null; tokens: string[]; inStock: boolean; minPrice?: number; maxPrice?: number },
+  cursor: string | undefined,
+  take: number
+): Promise<string[]> {
+  const conds: Prisma.Sql[] = [Prisma.sql`p."clientId" = ${clientId}`, Prisma.sql`p."isActive" = true`];
+  if (f.categoryIds) conds.push(Prisma.sql`p."categoryId" IN (${Prisma.join(f.categoryIds)})`);
+  for (const t of f.tokens) {
+    const like = likeEscape(t);
+    conds.push(Prisma.sql`(p."name" ILIKE ${like} OR p."sku" ILIKE ${like} OR p."description" ILIKE ${like})`);
+  }
+  if (f.inStock) conds.push(Prisma.sql`p."stockStatus" <> 'OUT_OF_STOCK'`);
+  if (f.minPrice != null) conds.push(Prisma.sql`p."price" >= ${f.minPrice}`);
+  if (f.maxPrice != null) conds.push(Prisma.sql`p."price" <= ${f.maxPrice}`);
+  if (cursor) conds.push(Prisma.sql`(lower(p."name"), p."id") > (SELECT lower(c."name"), c."id" FROM "Product" c WHERE c."id" = ${cursor})`);
+  const rows = await db.$queryRaw<{ id: string }[]>(
+    Prisma.sql`SELECT p."id" FROM "Product" p WHERE ${Prisma.join(conds, " AND ")} ORDER BY lower(p."name") ASC, p."id" ASC LIMIT ${take}`
+  );
+  return rows.map((r) => r.id);
 }
 
 export async function getProduct(clientId: string, slug: string) {

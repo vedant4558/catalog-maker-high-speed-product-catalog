@@ -131,10 +131,18 @@ Open `/admin` and sign in with `ADMIN_PASSWORD`.
 Editing a synced product locks the changed fields so the next sync keeps your edits (unlock on the product page). Secrets are only ever read from environment variables; the UI shows whether they are present, never their values.
 
 ## 11. Customer catalog usage
-* `/` : browse. Category chips/tree (with subcategories), search box, sort, "in stock only". First 24 products are server-rendered; more load automatically while scrolling (or via a button).
+* `/` : browse. Category chips/tree (with subcategories), search box, sort (Newest / Price ↑ / Price ↓ / Name A–Z, done in the database before pagination, and kept when you change category or search), "in stock only". First 24 products are server-rendered; more load automatically while scrolling (or via a button).
 * `/p/<slug>` : product detail: name, price, availability, SKU, category, description, variants, image gallery with thumbnails and **lightbox** (keys ← → Esc, swipe), related products, wishlist, WhatsApp.
 * `/wishlist` : saved products. No login anywhere.
 * Missing image → neat placeholder. Out of stock → badge, still viewable. Empty category / no search results → helpful empty state. Unknown product → friendly "not available" page. Server problems → friendly retry page (never raw errors).
+
+### Demo product photos
+Each demo product has its own photo(s) of the right product type, defined in `prisma/demo-images.ts` (free Unsplash photos; carpets show carpets/rugs, round rugs show round rugs, runners show long rugs, curtains show curtains). "Heritage Red Carpet" deliberately has no photo to demonstrate the missing-image placeholder.
+If your database was seeded earlier, repair it once (safe, repeatable, only touches demo products whose images were set by the seed):
+```
+npm run db:fix-images -- --dry   # preview
+npm run db:fix-images            # apply
+```
 
 ## 12. Design switching
 Admin → **Settings → Active design** (`grid` or `showcase`). The next customer page load uses it (cache is cleared on save).
@@ -197,7 +205,7 @@ npm run dev                          # http://localhost:3000   admin: http://loc
 | Demo video of import/sync (if your assignment requires it) | ❌ your action: record it with your real stores |
 
 ## 19. Testing
-`npm test` runs **40 tests** against a real PostgreSQL (`DATABASE_URL`) using throwaway clients and local mock Shopify/Woo servers: sync engine (13), admin auth/validation/services (9), WhatsApp URL/message (5), customer catalog queries + admin→customer propagation + outage resilience (13). `npm run lint` = TypeScript check. Browser checks (Playwright, 108 assertions on mobile 375 px / tablet 768 px / desktop 1280 px, both designs): no horizontal scroll, SSR, progressive loading, search/empty states, wishlist persistence, WhatsApp URL from the admin-set number, design switching, missing number, unknown product, admin API blocked for customers. Test commands never delete real data.
+`npm test` runs **51 tests** against a real PostgreSQL (`DATABASE_URL`) using throwaway clients and local mock Shopify/Woo servers: sync engine (13), admin auth/validation/services (9), WhatsApp URL/message (5), customer catalog queries + admin→customer propagation + outage resilience (13), sorting (7: numeric price ↑/↓, newest by `createdAt`, case-insensitive A–Z, sort-before-pagination across pages, sort combined with search/category/in-stock). `npm run lint` = TypeScript check. Browser checks (Playwright, 108 assertions on mobile 375 px / tablet 768 px / desktop 1280 px, both designs): no horizontal scroll, SSR, progressive loading, search/empty states, wishlist persistence, WhatsApp URL from the admin-set number, design switching, missing number, unknown product, admin API blocked for customers. Test commands never delete real data.
 
 ## 20. Security
 Secrets only in environment variables (none in code, none in the client bundle, `.env` git-ignored, `.env.example` placeholders only). Admin: signed `httpOnly` `SameSite=Lax` cookie, middleware + per-route/action re-check, same-origin check on cookie mutations, generic login errors, rate limiting. Customer routes are read-only and need no auth; the public config exposes only name, WhatsApp number, design and currency. Input is validated with zod; Prisma parameterises all queries.

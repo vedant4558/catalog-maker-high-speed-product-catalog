@@ -4,7 +4,7 @@ import { ShowcaseCard } from "./Card";
 import { MoreProducts } from "@/components/shop/MoreProducts";
 import { catHref } from "@/lib/shop";
 
-export function ShowcaseHome({ categories, activeCategory, q, sort, inStock, items, nextCursor, qs }: HomeProps) {
+export function ShowcaseHome({ categories, activeCategory, q, sort, inStock, items, nextCursor, qs, keep }: HomeProps) {
   const children = activeCategory ? categories.filter((c) => c.parentId === activeCategory.id) : [];
   return (
     <>
@@ -22,7 +22,7 @@ export function ShowcaseHome({ categories, activeCategory, q, sort, inStock, ite
         </form>
       </div>
       {children.length > 0 && (
-        <ul className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">{children.map((c) => <li key={c.id}><Link href={catHref(c.slug)} className="block border border-stone-300 bg-white p-3 text-sm hover:border-stone-800"><span className="font-serif text-base">{c.name}</span><span className="block text-xs text-stone-500">{c.totalCount} items</span></Link></li>)}</ul>
+        <ul className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3">{children.map((c) => <li key={c.id}><Link href={catHref(c.slug, keep)} className="block border border-stone-300 bg-white p-3 text-sm hover:border-stone-800"><span className="font-serif text-base">{c.name}</span><span className="block text-xs text-stone-500">{c.totalCount} items</span></Link></li>)}</ul>
       )}
       {items.length === 0 ? (
         <div className="border border-dashed border-stone-300 bg-white px-4 py-14 text-center" role="status">
